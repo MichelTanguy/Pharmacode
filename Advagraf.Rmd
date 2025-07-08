@@ -35,7 +35,7 @@ Vp  = 271    // volume périphérique (L)
 CYP3A5 = 0     // Génotype CYP3A5 (0 ou 1)
 HCT    = 0.40  // Hématocrite (fraction, ex: 0.38)
 STUDY  = 0     // Facteur d’étude (0 ou 1)
- 
+
  [OMEGA] // Variabilité interindividuelle
 0.0576  // Ktr (24%²)
 0.0784  // CL  (28%²)
