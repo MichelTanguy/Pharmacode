@@ -48,7 +48,7 @@ TRANS2
 TRANS1
 GUT
 
-testestestest
+trop nul git
  [SIGMA] // Erreur résiduelle 
  
 0.0128   // erreur proportionnelle (11.3%²)
