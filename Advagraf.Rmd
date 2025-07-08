@@ -47,7 +47,7 @@ TRANS3
 TRANS2
 TRANS1
 GUT
-testestest
+
  [SIGMA] // Erreur résiduelle 
  
 0.0128   // erreur proportionnelle (11.3%²)
