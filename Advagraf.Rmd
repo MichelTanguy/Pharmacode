@@ -78,6 +78,13 @@ dxdt_PERIPH  = (Qi/Vci) * CENT - (Qi/Vpi) * PERIPH;
 
 [TABLE]
 double CP = (CENT / Vci) *1000 * (1 + EPS(1)) + EPS(2);  // µg/mL directement, car tout est en µg
+int i = 0;
+while(CP<0 && i <100) {
+simeps();
+CP = ((CENT/Vci)*1000) * (1 + EPS(1)) + EPS(2);
+++i;
+
+}
 
 [CAPTURE] CP CLi Vci;
 '
