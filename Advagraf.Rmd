@@ -21,25 +21,23 @@ library(tidyverse)
 ```{r}
 ##Model definition
 code <- '
-[SET] end = 100, delta = 0.1
+ [SET] end = 100, delta = 0.1
 
-[PARAM]
-Ktr   = 3.34
-CL    = 21.2
-Vc    = 486
-Q     = 79
-Vp    = 271
+ [PARAM]
+ 
+Ktr = 3.34   // taux de transit (h^-1)
+CL  = 21.2   // clairance (L/h)
+Q   = 79     // échange intercompartimental (L/h)
+Vc  = 486    // volume central (L)
+Vp  = 271    // volume périphérique (L)
 HCTCL = -1.14
 CYPCL = 2.00
-STKTR = 1.53
-STVC  = 0.29
-HCT   = 38.5
+// covariables
+CYP3A5 = 0     // Génotype CYP3A5 (0 ou 1)
+HCT    = 32  // Hématocrite 
+STUDY  = 0     // Facteur d’étude (0 ou 1)
 
-[PARAM] @covariates
-STUDY  = 0       // 0 = Advagraf ; 1 = autre étude
-CYP3A5 = 1       // 1 = expresseur ; 0 = non-expresseur
-
-[OMEGA]
+ [OMEGA] // Variabilité interindividuelle
 0.0576  // ETA Ktr
 0.0784  // ETA CL
 0.0961  // ETA Vc
@@ -47,43 +45,42 @@ CYP3A5 = 1       // 1 = expresseur ; 0 = non-expresseur
 0.3600  // ETA Vp
 
 [CMT] @annotated
-GUT     : compartiment gastrique [ADM]
-TRANS1  : transit 1
-TRANS2  : transit 2
-TRANS3  : transit 3
-CENT    : compartiment central [OBS]
-PERIPH  : compartiment périphérique
+GUT : estomac [ADM]
+TRANS1 : CPT TR 1 (µg)
+TRANS2 : CPT TR 2 (µg)
+TRANS3 : CPT TR 3 (µg)
+CENT  : Central compartment [OBS]
+PERIPH : peripheral compartment (µg)
 
-[SIGMA]
-1e-9  // erreur proportionnelle (très faible)
-1e-9  // erreur additive (très faible)
 
-[MAIN]
-double Ktr_i = Ktr * pow(STKTR, STUDY) * exp(ETA(1));
-double CLi   = CL  * pow((HCT / 35), HCTCL) * pow(CYPCL, CYP3A5) * exp(ETA(2));
-double Vci   = Vc  * pow(STVC, STUDY) * exp(ETA(3));
-double Qi    = Q   * exp(ETA(4));
-double Vpi   = Vp  * exp(ETA(5));
+ [SIGMA] // Erreur résiduelle selon Zhou et al., 2024, Frontiers in Pharmacology
+ 
+0.000001   // erreur proportionnelle
+0.000001   // erreur additive 
+
+ [MAIN]
+ 
+double Ktr3 = Ktr * exp(ETA(1));
+double CLi  = CL * pow((HCT / 35), -1.14) * pow(2.00, CYP3A5) * exp(ETA(2));
+double Vci  = Vc * pow(0.29, STUDY) * exp(ETA(3));
+double Qi   = Q * exp(ETA(4));
+double Vpi  = Vp * exp(ETA(5));
+
 
 [ODE]
-dxdt_GUT     = -Ktr_i * GUT;
-dxdt_TRANS1  =  Ktr_i * GUT     - Ktr_i * TRANS1;
-dxdt_TRANS2  =  Ktr_i * TRANS1  - Ktr_i * TRANS2;
-dxdt_TRANS3  =  Ktr_i * TRANS2  - Ktr_i * TRANS3;
-dxdt_CENT    =  Ktr_i * TRANS3 - (CLi / Vci) * CENT - (Qi / Vci) * CENT + (Qi / Vpi) * PERIPH;
-dxdt_PERIPH  =  (Qi / Vci) * CENT - (Qi / Vpi) * PERIPH;
+dxdt_GUT     = -Ktr3 * GUT;
+dxdt_TRANS1  =  Ktr3 * GUT    - Ktr3 * TRANS1;
+dxdt_TRANS2  =  Ktr3 * TRANS1 - Ktr3 * TRANS2;
+dxdt_TRANS3  =  Ktr3 * TRANS2 - Ktr3 * TRANS3;
+dxdt_CENT    = - (CLi/Vci) * CENT - (Qi/Vci) * CENT + (Qi/Vpi) * PERIPH + Ktr3 * TRANS3;
+dxdt_PERIPH  = (Qi/Vci) * CENT - (Qi/Vpi) * PERIPH;
+
 
 [TABLE]
-double CP = ((CENT / Vci)*1000) * (1 + EPS(1)) + EPS(2);  // µg/mL
-int i = 0;
-while(CP < 0 && i < 100) {
-  simeps();
-  CP = ((CENT / Vci)*1000) * (1 + EPS(1)) + EPS(2);
-  ++i;
-}
-[CAPTURE] CP CLi Vci Qi Vpi;
-'
+double CP = (CENT / Vci) *1000 * (1 + EPS(1)) + EPS(2);  // µg/mL directement, car tout est en µg
 
+[CAPTURE] CP CLi Vci;
+'
 #Compilation
 mod <- mcode("advagraf_model", code)
 ```
@@ -95,36 +92,38 @@ mod <- mcode("advagraf_model", code)
 set.seed(1234)
 
 cohort_data <- expand.ev(
-  ID = 1:10,
+  ID = 1:100,
   amt = 4.5,
-  ii=24,
+  ii = 24,
   cmt = 1,
-  addl  = 5
+  addl = 10
 ) %>%
   mutate(
-    HCT    = rtruncnorm(n(), a = 0.30, b = 0.50, mean = 0.40, sd = 0.04),   # HT (fraction)
-    CYP3A5 = sample(0:1, size = n(), replace = TRUE, prob = c(0.7, 0.3)),   # 30% express
-    STUDY  = sample(0:1, size = n(), replace = TRUE)                        # Centre
+    HCT    = rtruncnorm(n(), a = 30, b = 50, mean = 40, sd = 4),   # hématocrite (%) entre 30 et 50
+    CYP3A5 = sample(0:1, size = n(), replace = TRUE, prob = c(0.7, 0.3)),  # 30% express
+    STUDY  = sample(0:1, size = n(), replace = TRUE)   # aléatoire
   )
+
 
 ## Simulation sur 24h
 sim_CP <- mod %>%
   Req(CP) %>%
   data_set(cohort_data) %>%
   zero_re("sigma")%>%
-  mrgsim(end = 24, delta = 0.1) %>%
+  mrgsim(end = 240, delta = 0.5) %>%
   as_tibble()
 
 
 ##Graphes
-ggplot(sim_CP, aes(x = time, y = CP, color = factor(ID))) +
-  geom_line(show.legend = FALSE, linewidth = 1) +
+ggplot(sim_CP, aes(x = time, y = CP, group = ID)) +
+  geom_line(alpha = 0.5, color = "grey40") +
   labs(
     title = "Profil PK Advagraf",
     x = "Temps (h)",
     y = "Concentration en advagraf (µg/mL)"
   ) +
   theme_minimal()
+
 
 ```
 
