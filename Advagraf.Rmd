@@ -21,75 +21,85 @@ library(tidyverse)
 ```{r}
 ##Model definition
 code <- '
- [SET] end = 100, delta = 0.1
+[SET] end = 100, delta = 0.1
 
- [PARAM]
- 
-Ktr = 1.94   // taux de transit (h^-1)
-Ka  = 1.94   // entrée vers central
-CL  = 21.2   // clairance (L/h)
-Q   = 79     // échange intercompartimental (L/h)
-Vc  = 486    // volume central (L)
-Vp  = 271    // volume périphérique (L)
-// covariables
-CYP3A5 = 0     // Génotype CYP3A5 (0 ou 1)
-HCT    = 0.40  // Hématocrite (fraction, ex: 0.38)
-STUDY  = 0     // Facteur d’étude (0 ou 1)
+[PARAM]
+Ktr   = 3.34
+CL    = 21.2
+Vc    = 486
+Q     = 79
+Vp    = 271
+HCTCL = -1.14
+CYPCL = 2.00
+STKTR = 1.53
+STVC  = 0.29
+HCT   = 38.5
 
- [OMEGA] // Variabilité interindividuelle
-0.0576  // Ktr (24%²)
-0.0784  // CL  (28%²)
-0.0961  // Vc  (31%²)
-[CMT]
-CENT
-PERIPH
-TRANS3
-TRANS2
-TRANS1
-GUT
+[PARAM] @covariates
+STUDY  = 0       // 0 = Advagraf ; 1 = autre étude
+CYP3A5 = 1       // 1 = expresseur ; 0 = non-expresseur
 
- [SIGMA] // Erreur résiduelle 
- 
-0.0128   // erreur proportionnelle (11.3%²)
-0.5041   // erreur additive (0.71²)
+[OMEGA]
+0.0576  // ETA Ktr
+0.0784  // ETA CL
+0.0961  // ETA Vc
+0.2916  // ETA Q
+0.3600  // ETA Vp
 
- [MAIN]
- 
-double CLcov = CL * (1 + 0.2 * CYP3A5) * (1 + 0.5 * (0.4 - HCT));  // Effet CYP3A5 (+20%) et HCT (inverse)
-double Vccov = Vc * (1 + 0.1 * STUDY);  // Effet de l’étude (+10%)
+[CMT] @annotated
+GUT     : compartiment gastrique [ADM]
+TRANS1  : transit 1
+TRANS2  : transit 2
+TRANS3  : transit 3
+CENT    : compartiment central [OBS]
+PERIPH  : compartiment périphérique
 
-double Ktr3 = Ktr * exp(ETA(1));        // ETA prend en compte IIV
-double CLi  = CL * (1 + 0.2 * CYP3A5) * (1 + 0.5 * (0.4 - HCT)) * exp(ETA(2));  // IIV + covariables
-double Vci  = Vc * (1 + 0.1 * STUDY) * exp(ETA(3));  // IIV + facteur étude
+[SIGMA]
+1e-9  // erreur proportionnelle (très faible)
+1e-9  // erreur additive (très faible)
+
+[MAIN]
+double Ktr_i = Ktr * pow(STKTR, STUDY) * exp(ETA(1));
+double CLi   = CL  * pow((HCT / 35), HCTCL) * pow(CYPCL, CYP3A5) * exp(ETA(2));
+double Vci   = Vc  * pow(STVC, STUDY) * exp(ETA(3));
+double Qi    = Q   * exp(ETA(4));
+double Vpi   = Vp  * exp(ETA(5));
 
 [ODE]
-dxdt_GUT    = -Ktr3 * GUT;
-dxdt_TRANS1 =  Ktr3 * GUT    - Ktr3 * TRANS1;
-dxdt_TRANS2 =  Ktr3 * TRANS1 - Ktr3 * TRANS2;
-dxdt_TRANS3 =  Ktr3 * TRANS2 - Ka * TRANS3;
-dxdt_CENT   =  Ka * TRANS3 - (CLi/Vci)*CENT - Q/Vci*CENT + Q/Vp*PERIPH;
-dxdt_PERIPH =  Q/Vci*CENT - Q/Vp*PERIPH;
+dxdt_GUT     = -Ktr_i * GUT;
+dxdt_TRANS1  =  Ktr_i * GUT     - Ktr_i * TRANS1;
+dxdt_TRANS2  =  Ktr_i * TRANS1  - Ktr_i * TRANS2;
+dxdt_TRANS3  =  Ktr_i * TRANS2  - Ktr_i * TRANS3;
+dxdt_CENT    =  Ktr_i * TRANS3 - (CLi / Vci) * CENT - (Qi / Vci) * CENT + (Qi / Vpi) * PERIPH;
+dxdt_PERIPH  =  (Qi / Vci) * CENT - (Qi / Vpi) * PERIPH;
 
 [TABLE]
-double CP_pred = CENT / Vci;
-double CP = CP_pred * (1 + EPS(1)) + EPS(2);
-capture CP;
+double CP = ((CENT / Vci)*1000) * (1 + EPS(1)) + EPS(2);  // µg/mL
+int i = 0;
+while(CP < 0 && i < 100) {
+  simeps();
+  CP = ((CENT / Vci)*1000) * (1 + EPS(1)) + EPS(2);
+  ++i;
+}
+[CAPTURE] CP CLi Vci Qi Vpi;
 '
+
 #Compilation
 mod <- mcode("advagraf_model", code)
 ```
 
 
 ```{r}
-#Test cohorte de 20 patients
+#Test cohorte de patients
 ##Génération de la cohorte
 set.seed(1234)
 
 cohort_data <- expand.ev(
-  ID = 1:200,
+  ID = 1:10,
   amt = 4.5,
-  time = 0,
-  cmt = 1
+  ii=24,
+  cmt = 1,
+  addl  = 5
 ) %>%
   mutate(
     HCT    = rtruncnorm(n(), a = 0.30, b = 0.50, mean = 0.40, sd = 0.04),   # HT (fraction)
@@ -98,20 +108,24 @@ cohort_data <- expand.ev(
   )
 
 ## Simulation sur 24h
-sim_cohort <- mod %>%
+sim_CP <- mod %>%
+  Req(CP) %>%
   data_set(cohort_data) %>%
+  zero_re("sigma")%>%
   mrgsim(end = 24, delta = 0.1) %>%
   as_tibble()
 
+
 ##Graphes
-ggplot(sim_cohort, aes(x = time, y = CP, color = factor(ID))) +
+ggplot(sim_CP, aes(x = time, y = CP, color = factor(ID))) +
   geom_line(show.legend = FALSE, linewidth = 1) +
   labs(
-    title = "PK simulée - Advagraf (200 patients avec COV)",
+    title = "Profil PK Advagraf",
     x = "Temps (h)",
-    y = "Concentration (ng/mL)"
+    y = "Concentration en advagraf (µg/mL)"
   ) +
   theme_minimal()
 
 ```
+
 
