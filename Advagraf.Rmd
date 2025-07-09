@@ -2,7 +2,7 @@
 title: "PK Advagraf test"
 author: "MICHEL Tanguy"
 date: "08-07-2O25"
-source: "Woillard et al., Br J Clin Pharmacol, 2011"
+source: "woillard et al., Br J Clin Pharmacol, 2011"
 output: html_document
 ---
 
